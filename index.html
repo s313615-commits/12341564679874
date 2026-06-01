@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>歡樂釣魚大師 (Fishing Master)</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #2c3e50;
+            font-family: 'Microsoft JhengHei', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            background: linear-gradient(to bottom, #85d7ff 0%, #3a7bd5 20%, #0052d4 100%);
+            border: 4px solid #fff;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+        /* UI 介面 */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+            text-shadow: 1px 1px 4px rgba(0,0,0,0.6);
+            z-index: 10;
+            pointer-events: none;
+        }
+        .ui-box {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 8px 15px;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        /* 遊戲畫布 */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        /* 面板彈窗 */
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 20;
+        }
+        .screen.hidden {
+            display: none;
+        }
+        .screen h1 {
+            font-size: 42px;
+            margin-bottom: 10px;
+            color: #ffeb3b;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.5);
+        }
+        .screen p {
+            font-size: 20px;
+            margin-bottom: 30px;
+            color: #e0e0e0;
+            max-width: 500px;
+            text-align: center;
+            line-height: 1.6;
+        }
+        .btn {
+            padding: 12px 35px;
+            font-size: 22px;
+            font-weight: bold;
+            background: linear-gradient(45deg, #4caf50, #8bc34a);
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            transition: transform 0.1s, filter 0.2s;
+        }
+        .btn:hover {
+            filter: brightness(1.1);
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+        #fail-btn {
+            background: linear-gradient(45deg, #f44336, #ff5722);
+        }
+        .btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="ui-layer">
+            <div class="ui-box">關卡: <span id="ui-level">1</span>/5</div>
+            <div class="ui-box">分數: <span id="ui-score">0</span> / <span id="ui-target">100</span></div>
+            <div class="ui-box">剩餘時間: <span id="ui-time">30</span> 秒</div>
+        </div>
+
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+        <div id="start-screen" class="screen">
+            <h1>歡樂釣魚大師</h1>
+            <p>點擊畫面任意地方發射魚鉤！<br>抓取美味的魚隻賺取分數，避開巨大的海洋垃圾。<br>限時內達到目標分數即可晉級，共有 5 個挑戰關卡！</p>
+            <button class="btn" id="start-btn" onclick="startGame()" disabled>載入中...</button>
+        </div>
+
+        <div id="pass-screen" class="screen hidden">
+            <h1 id="pass-title">成功過關！</h1>
+            <p id="pass-desc">太厲害了！準備好迎接下一關了嗎？</p>
+            <button class="btn" id="next-btn" onclick="nextLevel()">進入下一關</button>
+        </div>
+
+        <div id="fail-screen" class="screen hidden">
+            <h1 id="fail-title">時間到！</h1>
+            <p id="fail-desc">很遺憾，您沒有達到目標分數。</p>
+            <button class="btn" id="fail-btn" onclick="restartGame()">重新挑戰</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('start-btn');
+
+        // --- 圖片載入 ---
+        const trashImage = new Image();
+        trashImage.src = '11.png'; 
+
+        trashImage.onload = function() {
+            startBtn.innerText = "開始遊戲";
+            startBtn.disabled = false;
+        };
+
+        trashImage.onerror = function() {
+            startBtn.innerText = "圖片載入失敗";
+            startBtn.style.background = "#e74c3c";
+            console.error("無法載入圖片: 11.png。請確保檔案存在於 index.html 的同一個資料夾中。");
+        };
+
+        // 遊戲狀態與參數
+        let gameState = 'START'; 
+        let score = 0;
+        let currentLevel = 1;
+        let timeLeft = 30;
+        let gameInterval;
+        let timerInterval;
+
+        // 關卡配置
+        const levelConfigs = {
+            1: { targetScore: 60, timeLimit: 35, fishCount: 5, trashCount: 1, fishSpeedMin: 1, fishSpeedMax: 2 },
+            2: { targetScore: 100, timeLimit: 30, fishCount: 6, trashCount: 2, fishSpeedMin: 1.5, fishSpeedMax: 2.8 },
+            3: { targetScore: 150, timeLimit: 28, fishCount: 6, trashCount: 3, fishSpeedMin: 2, fishSpeedMax: 3.5 },
+            4: { targetScore: 200, timeLimit: 25, fishCount: 7, trashCount: 4, fishSpeedMin: 2.2, fishSpeedMax: 4.2 },
+            5: { targetScore: 260, timeLimit: 22, fishCount: 8, trashCount: 5, fishSpeedMin: 2.5, fishSpeedMax: 5.0 }
+        };
+
+        // 釣竿與魚鉤屬性
+        const boat = { x: 400, y: 75 }; 
+        const hook = {
+            x: 400,
+            y: 105,
+            angle: 0,
+            angleSpeed: 0.03,
+            length: 30,
+            state: 'SWING', 
+            speed: 6,
+            maxLen: 520,
+            minLen: 30,
+            caughtItem: null
+        };
+
+        let fishArray = [];
+        let particles = [];
+
+        canvas.addEventListener('click', () => {
+            if (hook.state === 'SWING' && gameState === 'PLAYING') {
+                hook.state = 'SHOOT';
+            }
+        });
+
+        function initLevel(level) {
+            currentLevel = level;
+            const config = levelConfigs[level];
+            
+            score = 0;
+            timeLeft = config.timeLimit;
+            
+            hook.length = hook.minLen;
+            hook.state = 'SWING';
+            hook.angle = 0;
+            hook.caughtItem = null;
+
+            fishArray = [];
+            
+            // 魚群
+            const fishTypes = [
+                { color: '#ff7675', radius: 14, score: 20, weight: 1.0 }, 
+                { color: '#fdcb6e', radius: 20, score: 35, weight: 1.4 }, 
+                { color: '#9b59b6', radius: 26, score: 60, weight: 2.0 }  
+            ];
+
+            for (let i = 0; i < config.fishCount; i++) {
+                const type = fishTypes[Math.floor(Math.random() * fishTypes.length)];
+                fishArray.push({
+                    x: Math.random() * (canvas.width - 100) + 50,
+                    y: Math.random() * (canvas.height - 250) + 180,
+                    dx: (Math.random() > 0.5 ? 1 : -1) * (Math.random() * (config.fishSpeedMax - config.fishSpeedMin) + config.fishSpeedMin),
+                    ...type,
+                    isTrash: false
+                });
+            }
+
+            // 巨大化垃圾
+            for (let i = 0; i < config.trashCount; i++) {
+                fishArray.push({
+                    x: Math.random() * (canvas.width - 120) + 60,
+                    y: Math.random() * (canvas.height - 250) + 200,
+                    dx: (Math.random() > 0.5 ? 0.6 : -0.6) * (Math.random() * 1 + 0.5),
+                    color: '#7f8c8d',
+                    radius: 50, // 垃圾半徑大幅增加 (原為20)，體積變大 2.5 倍
+                    score: -15, 
+                    weight: 3.0, // 變更重，拉起來更慢
+                    isTrash: true
+                });
+            }
+
+            updateUI();
+        }
+
+        function updateUI() {
+            document.getElementById('ui-level').innerText = currentLevel;
+            document.getElementById('ui-score').innerText = score;
+            document.getElementById('ui-target').innerText = levelConfigs[currentLevel].targetScore;
+            document.getElementById('ui-time').innerText = timeLeft;
+        }
+
+        function startGame() {
+            document.getElementById('start-screen').classList.add('hidden');
+            gameState = 'PLAYING';
+            initLevel(1);
+            startTimers();
+        }
+
+        function startTimers() {
+            clearInterval(gameInterval);
+            clearInterval(timerInterval);
+
+            gameInterval = setInterval(gameLoop, 1000 / 60);
+
+            timerInterval = setInterval(() => {
+                if (gameState === 'PLAYING') {
+                    timeLeft--;
+                    updateUI();
+                    if (timeLeft <= 0) {
+                        checkLevelEnd();
+                    }
+                }
+            }, 1000);
+        }
+
+        function checkLevelEnd() {
+            const target = levelConfigs[currentLevel].targetScore;
+            if (score >= target) {
+                if (currentLevel === 5) {
+                    gameState = 'GAME_OVER';
+                    showEndScreen(true, "恭喜通關！", "你成功突破了所有海域，成為終極釣魚大師！");
+                } else {
+                    gameState = 'LEVEL_PASS';
+                    showEndScreen(false, "成功晉級！", `你達成了第 ${currentLevel} 關的目標！`);
+                }
+            } else {
+                gameState = 'GAME_OVER';
+                showEndScreen(true, "時間到！", `第 ${currentLevel} 關目標需要 ${target} 分，你只有 ${score} 分。`);
+            }
+        }
+
+        function showEndScreen(isFailScreen, title, desc) {
+            if (isFailScreen) {
+                document.getElementById('fail-title').innerText = title;
+                document.getElementById('fail-desc').innerHTML = desc;
+                document.getElementById('fail-screen').classList.remove('hidden');
+            } else {
+                document.getElementById('pass-title').innerText = title;
+                document.getElementById('pass-desc').innerHTML = desc;
+                document.getElementById('pass-screen').classList.remove('hidden');
+            }
+        }
+
+        function nextLevel() {
+            document.getElementById('pass-screen').classList.add('hidden');
+            gameState = 'PLAYING';
+            initLevel(currentLevel + 1);
+        }
+
+        function restartGame() {
+            document.getElementById('fail-screen').classList.add('hidden');
+            gameState = 'PLAYING';
+            initLevel(1);
+            startTimers();
+        }
+
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x: x, y: y,
+                    dx: (Math.random() - 0.5) * 4,
+                    dy: (Math.random() - 0.5) * 4,
+                    radius: Math.random() * 3 + 2,
+                    color: color,
+                    life: 30
+                });
+            }
+        }
+
+        // --- 主遊戲引擎迴圈 ---
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 1. 天空
+            ctx.fillStyle = '#a0e7ff';
+            ctx.fillRect(0, 0, canvas.width, boat.y);
+
+            // 2. 橘色小船
+            ctx.fillStyle = '#e67e22';
+            ctx.fillRect(boat.x - 40, boat.y - 20, 80, 20);
+            ctx.beginPath();
+            ctx.arc(boat.x, boat.y - 20, 10, 0, Math.PI, true);
+            ctx.fillStyle = '#f1c40f';
+            ctx.fill();
+
+            // 3. 魚鉤邏輯
+            if (hook.state === 'SWING') {
+                hook.angle += hook.angleSpeed;
+                if (hook.angle > Math.PI / 2.3 || hook.angle < -Math.PI / 2.3) {
+                    hook.angleSpeed = -hook.angleSpeed; 
+                }
+                hook.x = boat.x + Math.sin(hook.angle) * hook.length;
+                hook.y = boat.y + Math.cos(hook.angle) * hook.length;
+            } 
+            else if (hook.state === 'SHOOT') {
+                hook.length += hook.speed;
+                hook.x = boat.x + Math.sin(hook.angle) * hook.length;
+                hook.y = boat.y + Math.cos(hook.angle) * hook.length;
+
+                if (hook.length >= hook.maxLen || hook.x < 10 || hook.x > canvas.width - 10) {
+                    hook.state = 'RETRACT';
+                }
+
+                // 碰撞檢測
+                for (let item of fishArray) {
+                    let dist = Math.hypot(hook.x - item.x, hook.y - item.y);
+                    if (dist < item.radius + 8) {
+                        hook.caughtItem = item;
+                        hook.state = 'RETRACT';
+                        break; 
+                    }
+                }
+            } 
+            else if (hook.state === 'RETRACT') {
+                let returnSpeed = hook.speed;
+                if (hook.caughtItem) {
+                    returnSpeed /= hook.caughtItem.weight;
+                }
+                
+                hook.length -= returnSpeed;
+                hook.x = boat.x + Math.sin(hook.angle) * hook.length;
+                hook.y = boat.y + Math.cos(hook.angle) * hook.length;
+
+                if (hook.caughtItem) {
+                    hook.caughtItem.x = hook.x;
+                    // 【已修正】更正變數名稱，徹底解決抓到魚畫面卡死的 Bug
+                    hook.caughtItem.y = hook.caughtItem.isTrash ? hook.y : hook.y + 10;
+                }
+
+                if (hook.length <= hook.minLen) {
+                    hook.length = hook.minLen;
+                    hook.state = 'SWING';
+
+                    if (hook.caughtItem) {
+                        score += hook.caughtItem.score;
+                        if (score < 0) score = 0; 
+                        
+                        createParticles(boat.x, boat.y + 10, hook.caughtItem.color);
+                        fishArray = fishArray.filter(f => f !== hook.caughtItem);
+                        hook.caughtItem = null;
+                        updateUI();
+                    }
+                }
+            }
+
+            // 4. 魚線與魚鉤
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(boat.x, boat.y);
+            ctx.lineTo(hook.x, hook.y);
+            ctx.stroke();
+
+            ctx.strokeStyle = '#bdc3c7';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(hook.x, hook.y - 4, 8, 0, Math.PI, false);
+            ctx.stroke();
+
+            // 5. 物件繪製
+            for (let item of fishArray) {
+                if (item !== hook.caughtItem) {
+                    item.x += item.dx;
+                    if (item.x < item.radius || item.x > canvas.width - item.radius) {
+                        item.dx = -item.dx;
+                    }
+                }
+
+                if (!item.isTrash) {
+                    ctx.fillStyle = item.color;
+                    ctx.beginPath();
+                    ctx.arc(item.x, item.y, item.radius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    let eyeX = item.dx > 0 ? item.x + item.radius/2 : item.x - item.radius/2;
+                    ctx.arc(eyeX, item.y - item.radius/4, 3, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = item.color;
+                    ctx.beginPath();
+                    let tailX = item.dx > 0 ? item.x - item.radius : item.x + item.radius;
+                    ctx.moveTo(tailX, item.y);
+                    ctx.lineTo(tailX + (item.dx > 0 ? -10 : 10), item.y - 8);
+                    ctx.lineTo(tailX + (item.dx > 0 ? -10 : 10), item.y + 8);
+                    ctx.fill();
+                } else {
+                    // 繪製加大版的 11.png 圖片
+                    ctx.drawImage(
+                        trashImage, 
+                        item.x - item.radius, 
+                        item.y - item.radius, 
+                        item.radius * 2,      
+                        item.radius * 2       
+                    );
+                }
+            }
+
+            // 6. 特效
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.dx;
+                p.y += p.dy;
+                p.life--;
+                
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life / 30;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1.0; 
+
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+    </script>
+</body>
+</html>
